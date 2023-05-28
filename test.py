@@ -1,8 +1,8 @@
 #! -*- coding: utf-8 -*-
 # Naive Bayes-based Context Extension (NBCE)
-# 使用朴素贝叶斯增加LLM的Context处理长度
-# 链接：https://kexue.fm/archives/9617
-# Torch 2.0 测试通过
+# Use Naive Bayes to increase the length of LLM's Context processing
+# Link: https://kexue.fm/archives/9617
+# Torch 2.0 test passed
 
 import json
 import torch
@@ -10,47 +10,47 @@ from transformers import AutoTokenizer
 from transformers import LlamaForCausalLM
 from transformers import TopPLogitsWarper, LogitsProcessorList
 
-# 经过微调的LLAMA
-# 下载地址：https://openbuddy.ai/
+# Fine-tuned LLAMA
+# Download address: https://openbuddy.ai/
 model_path = '/root/autodl-tmp/7b-trans-chat-0516-bf16'
 
-# 加载tokenizer
+# load tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 tokenizer.padding_side = 'left' 
 tokenizer.pad_token = tokenizer.unk_token
 
-# 加载LLAMA模型
+# Load the LLAMA model
 model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
 device = torch.device('cuda')
 
-# 加载示例Context
+# load example Context
 contexts = json.load(open('contexts.json'))
 
-# 示例问题集（一次性问多个问题，NBCE自行根据Context逐一输出答案）
-question = """请仔细阅读材料，逐一回答：
-- 菲律宾国家电网公司，中国占股多少？
-- 领英计划裁员多少人？
-- 吉利德收购Pharmasset的价格是多少？
-- 丙肝神药Sovaldi在哪一年上市？
-- 中亚峰会将在哪里举行？由谁主持？
-- 哪个演员由于侮辱人民军队而被立案调查？
-- 哪个项目宣称“能过坦克”的水上道路？
-- 如果你是默沙东的CEO，你的首要任务是什么？"""
+# Example question set (ask multiple questions at once, NBCE will output answers one by one according to the context)
+question = """Please read the materials carefully and answer one by one:
+- National Grid Corporation of the Philippines, how much is China's share?
+- How many people does LinkedIn plan to lay off?
+- How much did Gilead pay for Pharmasset?
+- In what year was Sovaldi, the miracle drug for hepatitis C, launched?
+- Where will the Central Asia Summit be held? Hosted by?
+- Which actor was investigated for insulting the People's Army?
+- Which project claims a "tank-able" waterway?
+- If you were the CEO of Merck, what would be your top priority? """
 
-# 拼接context和question
-contexts = [''] + contexts  # 添加空Context（无Context预测）
+# splicing context and question
+contexts = [''] + contexts # Add an empty Context (no Context prediction)
 batch = ['User: %s\n\n%s\n\nAssistant:' % (context, question) for context in contexts]
-print('Context长度分布：', [len(text) for text in batch])
-print('Context总长度：', sum([len(text) for text in batch]))
+print('Context length distribution:', [len(text) for text in batch])
+print('Context total length:', sum([len(text) for text in batch]))
 
-# Top-P截断
+# Top-P truncation
 processors = LogitsProcessorList()
 processors.append(TopPLogitsWarper(0.95))
 
 
 @torch.inference_mode()
 def generate(max_tokens):
-    """Naive Bayes-based Context Extension 演示代码
+    """Naive Bayes-based Context Extension demo code
     """
     inputs = tokenizer(batch, padding='longest', return_tensors='pt').to(device)
     input_ids = inputs.input_ids
@@ -61,7 +61,7 @@ def generate(max_tokens):
     n = input_ids.shape[0]
     
     for i in range(max_tokens):
-        # 模型输出
+        # Model output
         outputs = model(input_ids=input_ids,
                         attention_mask=attention_mask,
                         return_dict=True,
@@ -70,7 +70,7 @@ def generate(max_tokens):
                        )
         past_key_values = outputs.past_key_values
         
-        # ===== 核心代码开始 =====
+        # ===== Core Code Start =====
         beta = 0.25
         logits = outputs.logits[:, -1]
         logits = logits - logits.logsumexp(dim=-1, keepdims=True)
@@ -80,11 +80,11 @@ def generate(max_tokens):
         logits_uncond = logits[0]
         logits_merged = (1 + beta) * logits_max - beta * logits_uncond
         logits = torch.where(logits_uncond > -100, logits_merged, logits_max)
-        # ===== 核心代码结束 =====
+        # ===== End of core code =====
         
-        # 构建分布，采样
-        # tau = 1是标准的随机采样，tau->0则是贪心搜索
-        # 简单起见，这里没有实现topk、topp截断
+        # build distribution, sample
+        # tau = 1 is standard random sampling, tau->0 is greedy search
+        # For simplicity, topk and topp truncation are not implemented here
         tau = 0.01
         probas = torch.nn.functional.softmax(logits[None] / tau , dim=-1)
         next_tokens = torch.multinomial(probas, num_samples=1).squeeze(1)        
@@ -104,29 +104,29 @@ if __name__ == '__main__':
 
 
 """
-========= 输出结果参考 =========
+========= Output result reference =========
 
-1.菲律宾国家电网公司，中国占股多少？
-答：中国国家电网公司持有菲律宾国家电网公司40%的股份。
+1. How much is China's shareholding in National Grid Corporation of the Philippines?
+Answer: The State Grid Corporation of China holds 40% of the shares of the National Grid Corporation of the Philippines.
 
-2.领英计划裁员多少人？
-答：领英计划裁员716人。
+2. How many people does LinkedIn plan to lay off?
+A: LinkedIn plans to lay off 716 people.
 
-3.吉利德收购Pharmasset的价格是多少？
-答：吉利德收购Pharmasset的价格为110亿美元。
+3. How much did Gilead pay for Pharmasset?
+A: Gilead acquired Pharmasset for $11 billion.
 
-4.丙肝神药Sovaldi在哪一年上市？
-答：丙肝神药Sovaldi于2013年上市。
+4. In what year was Sovaldi, the miracle drug for hepatitis C, launched?
+Answer: Sovaldi, a miracle drug for hepatitis C, was launched in 2013.
 
-5.中亚峰会将在哪里举行？由谁主持？
-答：中亚峰会将在陕西省西安市举行，由国家主席习近平主持。
+5. Where will the Central Asia Summit be held? Hosted by?
+A: The Central Asia Summit will be held in Xi'an, Shaanxi Province and will be hosted by President Xi Jinping.
 
-6.哪个演员由于侮辱人民军队而被立案调查？
-答：李昊石因在表演中存在侮辱人民军队的言论而被立案调查。
+6. Which actor was investigated for insulting the People's Army?
+A: Li Haoshi was investigated for insulting the People's Army during his performance.
 
-7.哪个项目宣称“能过坦克”的水上道路？
-答：湖北恩施宣称的“能过坦克”水上道路。
+7. Which project claims to be a "tank-able" water road?
+Answer: Enshi, Hubei proclaimed that the "tank-passing" water road.
 
-8.如果你是默沙东的CEO，你的首要任务是什么？
-答：如果我是默沙东的CEO，我的首要任务是如何让基本盘更加坚固，并通过药物联用获得更好的增长。
+8. If you were the CEO of Merck, what would be your top priority?
+Answer: If I were the CEO of Merck, my first task would be how to make the basic market stronger and achieve better growth through drug combination.
 """
